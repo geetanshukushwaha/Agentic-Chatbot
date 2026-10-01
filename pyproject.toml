@@ -1,0 +1,28 @@
+[project]
+name = "agentic-chatbot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Geetanshu Kumar Kushwaha", email = "geetanshu7611@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.136.3",
+    "jinja2==3.1.6",
+    "langchain-core==1.4.0",
+    "langchain-google-genai==4.2.4",
+    "langchain-tavily==0.2.18",
+    "langgraph==1.2.2",
+    "pydantic==2.13.5",
+    "python-dotenv==1.2.2",
+    "sqlalchemy==2.0.50",
+    "uvicorn==0.48.0",
+]
+
+[project.scripts]
+agentic-chatbot = "agentic_chatbot:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"

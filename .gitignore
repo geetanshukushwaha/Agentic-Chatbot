@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local chatbot state and future user uploads
+data/
+uploads/
+chroma_db/
