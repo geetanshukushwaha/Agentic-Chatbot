@@ -1,5 +1,12 @@
 const messagesContainer = document.querySelector("#messages");
 const conversationsList = document.querySelector("#conversations");
+const conversationContextMenu = document.querySelector("#conversation-context-menu");
+const deleteConversationAction = document.querySelector("#delete-conversation-action");
+const appShell = document.querySelector(".app-shell");
+const sidebarToggleButton = document.querySelector("#sidebar-toggle");
+const sidebarCloseButton = document.querySelector("#sidebar-close");
+const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
+const mobileViewport = window.matchMedia("(max-width: 767px)");
 const messageInput = document.querySelector("#message");
 const sendButton = document.querySelector("#send");
 const errorAlert = document.querySelector("#error");
@@ -8,6 +15,54 @@ const composer = document.querySelector("#composer");
 const newChatButton = document.querySelector("#new-chat");
 
 let activeConversationId = localStorage.getItem("conversation_id");
+let sidebarOpen = false;
+let contextConversation = null;
+
+
+function closeConversationContextMenu(restoreFocus = false) {
+  const target = contextConversation?.target;
+  conversationContextMenu.hidden = true;
+  contextConversation = null;
+
+  if (restoreFocus) {
+    target?.focus();
+  }
+}
+
+
+function openConversationContextMenu(conversation, target, x, y) {
+  contextConversation = { conversation, target };
+  conversationContextMenu.hidden = false;
+
+  const left = Math.max(
+    8,
+    Math.min(x, window.innerWidth - conversationContextMenu.offsetWidth - 8),
+  );
+  const top = Math.max(
+    8,
+    Math.min(y, window.innerHeight - conversationContextMenu.offsetHeight - 8),
+  );
+
+  conversationContextMenu.style.left = `${left}px`;
+  conversationContextMenu.style.top = `${top}px`;
+  deleteConversationAction.focus();
+}
+
+
+function setSidebarOpen(open) {
+  sidebarOpen = open;
+  const isMobile = mobileViewport.matches;
+
+  document.body.classList.toggle("sidebar-open", isMobile && open);
+  appShell.classList.toggle("sidebar-collapsed", !isMobile && !open);
+
+  const label = open
+    ? (isMobile ? "Close sidebar" : "Hide sidebar")
+    : "Show sidebar";
+  sidebarToggleButton.setAttribute("aria-label", label);
+  sidebarToggleButton.setAttribute("title", label);
+  sidebarToggleButton.setAttribute("aria-expanded", String(open));
+}
 
 
 function showError(message) {
@@ -31,6 +86,20 @@ function scrollToBottom() {
 }
 
 
+function renderMessageContent(bubble, text, role) {
+  if (role === "assistant") {
+    bubble.dataset.rawText = text;
+
+    if (window.marked && window.DOMPurify) {
+      bubble.innerHTML = window.DOMPurify.sanitize(window.marked.parse(text));
+      return;
+    }
+  }
+
+  bubble.textContent = text;
+}
+
+
 function addMessageBubble(role, text = "") {
   document.querySelector("#welcome")?.remove();
 
@@ -44,7 +113,7 @@ function addMessageBubble(role, text = "") {
     "p-3",
     role === "user" ? "bg-primary text-white" : "bg-white border",
   ].join(" ");
-  bubble.textContent = text;
+  renderMessageContent(bubble, text, role);
 
   row.append(bubble);
   messagesContainer.append(row);
@@ -67,24 +136,97 @@ async function fetchApi(url, options = {}) {
 
 
 async function loadConversations() {
+  closeConversationContextMenu();
   const response = await fetchApi("/api/conversations");
   const { conversations } = await response.json();
 
   conversationsList.replaceChildren();
 
   for (const conversation of conversations) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = conversation.title;
-    button.className = [
+    const selectButton = document.createElement("button");
+    selectButton.type = "button";
+    selectButton.textContent = conversation.title;
+    selectButton.className = [
       "list-group-item",
       "list-group-item-action",
-      "text-truncate",
       conversation.id === activeConversationId ? "active" : "",
     ].join(" ");
+    selectButton.setAttribute("aria-haspopup", "menu");
+    selectButton.setAttribute("aria-controls", "conversation-context-menu");
+    selectButton.setAttribute("aria-keyshortcuts", "Shift+F10");
 
-    button.addEventListener("click", () => loadConversation(conversation.id));
-    conversationsList.append(button);
+    selectButton.addEventListener("click", () => loadConversation(conversation.id));
+
+    selectButton.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openConversationContextMenu(
+        conversation,
+        selectButton,
+        event.clientX,
+        event.clientY,
+      );
+    });
+
+    selectButton.addEventListener("keydown", (event) => {
+      if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+        return;
+      }
+
+      event.preventDefault();
+      const bounds = selectButton.getBoundingClientRect();
+      openConversationContextMenu(
+        conversation,
+        selectButton,
+        bounds.left,
+        bounds.bottom,
+      );
+    });
+
+    conversationsList.append(selectButton);
+  }
+
+  return conversations;
+}
+
+
+function showWelcomeMessage() {
+  const welcome = document.createElement("div");
+  welcome.id = "welcome";
+  welcome.className = "welcome-message";
+
+  const message = document.createElement("p");
+  message.textContent = "How can I help?";
+  welcome.append(message);
+  messagesContainer.replaceChildren(welcome);
+}
+
+
+async function deleteConversation(conversationId, title) {
+  if (!window.confirm(`Delete "${title}" and its messages? This cannot be undone.`)) {
+    return;
+  }
+
+  clearError();
+
+  try {
+    await fetchApi(`/api/conversations/${conversationId}`, { method: "DELETE" });
+    const deletedActiveConversation = conversationId === activeConversationId;
+    const conversations = await loadConversations();
+
+    if (!deletedActiveConversation) {
+      return;
+    }
+
+    activeConversationId = null;
+    localStorage.removeItem("conversation_id");
+
+    if (conversations.length > 0) {
+      await loadConversation(conversations[0].id);
+    } else {
+      showWelcomeMessage();
+    }
+  } catch (error) {
+    showError(error.message);
   }
 }
 
@@ -114,22 +256,44 @@ async function loadConversation(conversationId) {
   }
 
   await loadConversations();
+
+  if (mobileViewport.matches && sidebarOpen) {
+    setSidebarOpen(false);
+    sidebarToggleButton.focus();
+  }
 }
 
 
 function handleSseEvent(eventBlock, assistantBubble) {
-  const eventName = eventBlock.match(/^event: (.+)$/m)?.[1];
-  const rawData = eventBlock.match(/^data: (.+)$/m)?.[1];
+  let eventName;
+  const data = [];
 
-  if (!eventName || !rawData) {
+  for (const line of eventBlock.split("\n")) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const field = line.slice(0, separatorIndex);
+    const value = line.slice(separatorIndex + 1).replace(/^ /, "");
+
+    if (field === "event") {
+      eventName = value;
+    } else if (field === "data") {
+      data.push(value);
+    }
+  }
+
+  if (!eventName || data.length === 0) {
     return;
   }
 
-  const payload = JSON.parse(rawData);
+  const payload = JSON.parse(data.join("\n"));
 
   if (eventName === "token") {
     setStatus("Writing response...");
-    assistantBubble.textContent += payload.text;
+    const rawText = (assistantBubble.dataset.rawText || "") + payload.text;
+    renderMessageContent(assistantBubble, rawText, "assistant");
     scrollToBottom();
   }
 
@@ -169,6 +333,7 @@ async function streamAssistantReply(userMessage, assistantBubble) {
     }
 
     buffer += decoder.decode(value, { stream: true });
+    buffer = buffer.replace(/\r\n/g, "\n");
     const eventBlocks = buffer.split("\n\n");
     buffer = eventBlocks.pop() || "";
 
@@ -176,6 +341,9 @@ async function streamAssistantReply(userMessage, assistantBubble) {
       handleSseEvent(eventBlock, assistantBubble);
     }
   }
+
+  buffer += decoder.decode();
+  buffer = buffer.replace(/\r\n/g, "\n");
 
   if (buffer) {
     handleSseEvent(buffer, assistantBubble);
@@ -206,7 +374,7 @@ async function sendMessage(event) {
     const assistantBubble = addMessageBubble("assistant");
     await streamAssistantReply(userMessage, assistantBubble);
 
-    if (!assistantBubble.textContent) {
+    if (!assistantBubble.dataset.rawText) {
       assistantBubble.parentElement?.remove();
     }
 
@@ -244,9 +412,70 @@ async function initializeApp() {
 
 newChatButton.addEventListener("click", async () => {
   clearError();
-  await createConversation();
-  messageInput.focus();
+  newChatButton.disabled = true;
+
+  try {
+    await createConversation();
+    if (mobileViewport.matches) {
+      setSidebarOpen(false);
+    }
+    messageInput.focus();
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    newChatButton.disabled = false;
+  }
 });
+
+sidebarToggleButton.addEventListener("click", () => {
+  setSidebarOpen(!sidebarOpen);
+  if (mobileViewport.matches && sidebarOpen) {
+    sidebarCloseButton.focus();
+  }
+});
+
+sidebarCloseButton.addEventListener("click", () => {
+  setSidebarOpen(false);
+  sidebarToggleButton.focus();
+});
+
+sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !conversationContextMenu.hidden) {
+    event.preventDefault();
+    closeConversationContextMenu(true);
+    return;
+  }
+
+  if (event.key === "Escape" && mobileViewport.matches && sidebarOpen) {
+    setSidebarOpen(false);
+    sidebarToggleButton.focus();
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!conversationContextMenu.hidden && !conversationContextMenu.contains(event.target)) {
+    closeConversationContextMenu();
+  }
+});
+
+deleteConversationAction.addEventListener("click", () => {
+  const selectedConversation = contextConversation?.conversation;
+  closeConversationContextMenu();
+
+  if (selectedConversation) {
+    void deleteConversation(selectedConversation.id, selectedConversation.title);
+  }
+});
+
+window.addEventListener("resize", () => closeConversationContextMenu());
+
+mobileViewport.addEventListener("change", () => {
+  setSidebarOpen(!mobileViewport.matches);
+});
+
+setSidebarOpen(!mobileViewport.matches);
 
 composer.addEventListener("submit", sendMessage);
 messageInput.addEventListener("keydown", handleComposerKeydown);

@@ -18,16 +18,25 @@ from langchain_core.messages import (
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
-
+from datetime import datetime
 from .tools import WEB_TOOLS
 
+current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-SYSTEM_PROMPT = """You are a helpful and concise AI assistant.
+SYSTEM_PROMPT = f"""
 
-Use the web-search tool only when a question needs current, recent, or live
-information: news, prices, current leaders, new releases, or recent events.
-For normal questions, answer directly without searching. When you use search,
-base your answer on its results and mention the relevant sources.
+You are a helpful and concise AI assistant.
+
+Current date and time: {current_datetime}
+
+Rules:
+1. Use the web-search tool when the user asks for current, recent, live, or time-sensitive information.
+2. For current date/time, use the provided current date/time above.
+3. Do not invent, guess, or contradict the provided current date/time.
+4. When using web search, treat search results as evidence, not as infallible truth.
+5. If sources conflict, acknowledge the conflict and prefer the more reliable/relevant source.
+6. Never change a factual answer merely because the user asks you to "check again"; re-verify it first.
+7. Be concise and directly answer the user's question.
 """
 
 
