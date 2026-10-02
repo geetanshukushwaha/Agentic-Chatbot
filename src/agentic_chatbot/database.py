@@ -75,15 +75,26 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
 
 
-def create_conversation(visitor_id: str) -> Conversation:
-    """Create an empty chat owned by one anonymous browser visitor."""
-    conversation = Conversation(id=str(uuid4()), visitor_id=visitor_id)
-
+def get_or_create_empty_conversation(visitor_id: str) -> tuple[Conversation, bool]:
+    """Reuse this visitor's newest empty chat, or create one when none exists."""
     with SessionLocal() as db:
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.visitor_id == visitor_id,
+                ~Conversation.messages.any(),
+            )
+            .order_by(Conversation.updated_at.desc())
+            .first()
+        )
+        if conversation is not None:
+            return conversation, False
+
+        conversation = Conversation(id=str(uuid4()), visitor_id=visitor_id)
         db.add(conversation)
         db.commit()
 
-    return conversation
+    return conversation, True
 
 
 def get_conversation(visitor_id: str, conversation_id: str) -> Conversation | None:
@@ -95,6 +106,26 @@ def get_conversation(visitor_id: str, conversation_id: str) -> Conversation | No
         return conversation
 
     return None
+
+
+def delete_conversation(visitor_id: str, conversation_id: str) -> bool:
+    """Delete a visitor-owned conversation and its messages."""
+    with SessionLocal() as db:
+        conversation = (
+            db.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.visitor_id == visitor_id,
+            )
+            .first()
+        )
+        if conversation is None:
+            return False
+
+        db.delete(conversation)
+        db.commit()
+
+    return True
 
 
 def list_conversations(visitor_id: str) -> list[Conversation]:

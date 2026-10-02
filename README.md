@@ -1,5 +1,7 @@
 # Agentic Chatbot
 
+[Live Project](https://agentic-chatbot-f22s.onrender.com/)
+
 A lightweight AI chatbot built with FastAPI, LangGraph, Google Gemini, and Tavily. The app supports streamed responses, web search when needed, and persistent chat history stored in SQLite.
 
 ## Features

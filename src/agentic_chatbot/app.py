@@ -21,7 +21,8 @@ from .database import (
     ChatMessage,
     Conversation,
     add_message,
-    create_conversation,
+    delete_conversation,
+    get_or_create_empty_conversation,
     get_conversation,
     init_db,
     list_conversations,
@@ -151,6 +152,7 @@ def stream_assistant_response(
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request) -> HTMLResponse:
     response = templates.TemplateResponse(request, "index.html")
+    response.headers["Cache-Control"] = "no-cache"
     visitor_id, should_set_cookie = get_visitor_id(request)
 
     if should_set_cookie:
@@ -178,16 +180,31 @@ def get_conversations(request: Request) -> JSONResponse:
     return response
 
 
-@app.post("/api/conversations", status_code=201)
+@app.post("/api/conversations")
 def create_new_conversation(request: Request) -> JSONResponse:
     visitor_id, should_set_cookie = get_visitor_id(request)
-    conversation = create_conversation(visitor_id)
+    conversation, created = get_or_create_empty_conversation(visitor_id)
 
-    response = JSONResponse(serialize_conversation(conversation), status_code=201)
+    response = JSONResponse(
+        serialize_conversation(conversation),
+        status_code=201 if created else 200,
+    )
     if should_set_cookie:
         set_visitor_cookie(response, visitor_id)
 
     return response
+
+
+@app.delete("/api/conversations/{conversation_id}")
+def delete_existing_conversation(
+    conversation_id: str,
+    request: Request,
+) -> JSONResponse:
+    visitor_id, _ = get_visitor_id(request)
+    if not delete_conversation(visitor_id, conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return JSONResponse({"deleted": True})
 
 
 @app.get("/api/conversations/{conversation_id}")
