@@ -1,4 +1,5 @@
 const messagesContainer = document.querySelector("#messages");
+const messageThread = document.querySelector("#message-thread");
 const conversationsList = document.querySelector("#conversations");
 const conversationContextMenu = document.querySelector("#conversation-context-menu");
 const deleteConversationAction = document.querySelector("#delete-conversation-action");
@@ -6,17 +7,18 @@ const appShell = document.querySelector(".app-shell");
 const sidebarToggleButton = document.querySelector("#sidebar-toggle");
 const sidebarCloseButton = document.querySelector("#sidebar-close");
 const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
+const exportChatButton = document.querySelector("#export-chat");
 const mobileViewport = window.matchMedia("(max-width: 767px)");
 const messageInput = document.querySelector("#message");
 const sendButton = document.querySelector("#send");
 const errorAlert = document.querySelector("#error");
-const statusText = document.querySelector("#status");
 const composer = document.querySelector("#composer");
 const newChatButton = document.querySelector("#new-chat");
 
 let activeConversationId = localStorage.getItem("conversation_id");
 let sidebarOpen = false;
 let contextConversation = null;
+let statusText = null;
 
 
 function closeConversationContextMenu(restoreFocus = false) {
@@ -77,7 +79,9 @@ function clearError() {
 
 
 function setStatus(message) {
-  statusText.textContent = message;
+  if (statusText) {
+    statusText.textContent = message;
+  }
 }
 
 
@@ -108,37 +112,89 @@ function updateVisualViewport() {
 
 
 function renderMessageContent(bubble, text, role) {
-  if (role === "assistant") {
-    bubble.dataset.rawText = text;
-
-    if (window.marked && window.DOMPurify) {
-      bubble.innerHTML = window.DOMPurify.sanitize(window.marked.parse(text));
-      return;
-    }
+  if (role === "assistant" && window.marked && window.DOMPurify) {
+    bubble.innerHTML = window.DOMPurify.sanitize(window.marked.parse(text));
+    return;
   }
 
   bubble.textContent = text;
 }
 
 
-function addMessageBubble(role, text = "") {
+function updateExportButton() {
+  exportChatButton.disabled =
+    !activeConversationId || !messageThread.querySelector(".message-bubble");
+}
+
+
+function exportActiveChat() {
+  const messages = [...messageThread.querySelectorAll(".message-bubble")];
+  if (!activeConversationId || messages.length === 0) {
+    return;
+  }
+
+  const title = conversationsList.querySelector(".active")?.textContent.trim() || "chat";
+  const transcript = messages
+    .map((message) => {
+      const speaker = message.dataset.role === "user" ? "You" : "Assistant";
+      return `${speaker}:\n${message.dataset.rawText || ""}`;
+    })
+    .join("\n\n");
+  const filename = title
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 80) || "chat";
+  const downloadUrl = URL.createObjectURL(
+    new Blob([`${title}\n\n${transcript}\n`], { type: "text/plain;charset=utf-8" }),
+  );
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  link.download = `${filename}.txt`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(downloadUrl), 1_000);
+}
+
+
+function addMessageBubble(role, text = "", showStatus = false) {
   document.querySelector("#welcome")?.remove();
 
   const row = document.createElement("div");
-  row.className = `d-flex mb-3 ${role === "user" ? "justify-content-end" : ""}`;
+  row.className = "d-flex message-row";
+  if (role === "user") {
+    row.classList.add("user-row", "justify-content-end");
+  }
 
   const bubble = document.createElement("div");
   bubble.className = [
     "message-bubble",
-    "rounded-3",
-    "p-3",
-    role === "user" ? "bg-primary text-white" : "bg-white border",
+    role === "user" ? "user-message" : "assistant-message",
   ].join(" ");
-  renderMessageContent(bubble, text, role);
+  bubble.dataset.role = role;
+  bubble.dataset.rawText = text;
+
+  const roleLabel = document.createElement("div");
+  roleLabel.className = "message-role";
+  roleLabel.textContent = role === "user" ? "You:" : "Assistant:";
+
+  if (showStatus) {
+    statusText = document.createElement("span");
+    statusText.id = "status";
+    statusText.className = "message-status";
+    statusText.setAttribute("aria-live", "polite");
+    statusText.textContent = "Thinking...";
+    roleLabel.append(statusText);
+  }
+
+  const content = document.createElement("div");
+  content.className = "message-content";
+  renderMessageContent(content, text, role);
+  bubble.append(roleLabel, content);
 
   row.append(bubble);
-  messagesContainer.append(row);
+  messageThread.append(row);
   scrollToBottom();
+  updateExportButton();
 
   return bubble;
 }
@@ -211,6 +267,7 @@ async function loadConversations() {
 
 
 function showWelcomeMessage() {
+  statusText = null;
   const welcome = document.createElement("div");
   welcome.id = "welcome";
   welcome.className = "welcome-message";
@@ -218,7 +275,7 @@ function showWelcomeMessage() {
   const message = document.createElement("p");
   message.textContent = "How can I help?";
   welcome.append(message);
-  messagesContainer.replaceChildren(welcome);
+  messageThread.replaceChildren(welcome);
 }
 
 
@@ -240,6 +297,7 @@ async function deleteConversation(conversationId, title) {
 
     activeConversationId = null;
     localStorage.removeItem("conversation_id");
+    updateExportButton();
 
     if (conversations.length > 0) {
       await loadConversation(conversations[0].id);
@@ -257,8 +315,10 @@ async function createConversation() {
   const conversation = await response.json();
 
   activeConversationId = conversation.id;
+  statusText = null;
   localStorage.setItem("conversation_id", activeConversationId);
-  messagesContainer.replaceChildren();
+  messageThread.replaceChildren();
+  updateExportButton();
 
   await loadConversations();
 }
@@ -269,8 +329,10 @@ async function loadConversation(conversationId) {
   const { messages } = await response.json();
 
   activeConversationId = conversationId;
+  statusText = null;
   localStorage.setItem("conversation_id", activeConversationId);
-  messagesContainer.replaceChildren();
+  messageThread.replaceChildren();
+  updateExportButton();
 
   for (const message of messages) {
     addMessageBubble(message.role, message.content);
@@ -314,7 +376,13 @@ function handleSseEvent(eventBlock, assistantBubble) {
   if (eventName === "token") {
     setStatus("Writing response...");
     const rawText = (assistantBubble.dataset.rawText || "") + payload.text;
-    renderMessageContent(assistantBubble, rawText, "assistant");
+    assistantBubble.dataset.rawText = rawText;
+    renderMessageContent(
+      assistantBubble.querySelector(".message-content"),
+      rawText,
+      "assistant",
+    );
+    updateExportButton();
     scrollToBottom();
   }
 
@@ -381,7 +449,6 @@ async function sendMessage(event) {
   }
 
   clearError();
-  setStatus("Thinking...");
 
   try {
     if (!activeConversationId) {
@@ -392,7 +459,7 @@ async function sendMessage(event) {
     messageInput.value = "";
     sendButton.disabled = true;
 
-    const assistantBubble = addMessageBubble("assistant");
+    const assistantBubble = addMessageBubble("assistant", "", true);
     await streamAssistantReply(userMessage, assistantBubble);
 
     if (!assistantBubble.dataset.rawText) {
@@ -490,8 +557,12 @@ deleteConversationAction.addEventListener("click", () => {
   }
 });
 
-window.addEventListener("resize", () => closeConversationContextMenu());
-window.addEventListener("resize", updateVisualViewport);
+exportChatButton.addEventListener("click", exportActiveChat);
+
+window.addEventListener("resize", () => {
+  closeConversationContextMenu();
+  updateVisualViewport();
+});
 window.visualViewport?.addEventListener("resize", updateVisualViewport);
 window.visualViewport?.addEventListener("scroll", updateVisualViewport);
 
