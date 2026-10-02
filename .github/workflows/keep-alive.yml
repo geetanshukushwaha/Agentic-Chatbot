@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Render
-        run: curl -f https://agentic-chatbot-f22s.onrender.com/health
+        run: curl -sSf --max-time 120 --retry 3 --retry-delay 5 https://agentic-chatbot-f22s.onrender.com/health
