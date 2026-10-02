@@ -34,6 +34,7 @@ load_dotenv()
 
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 VISITOR_COOKIE = "agentic_visitor"
+VISITOR_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 MODEL_HISTORY_LIMIT = 16
 
 logger = logging.getLogger(__name__)
@@ -60,20 +61,26 @@ class MessageInput(BaseModel):
     message: str = Field(min_length=1, max_length=8_000)
 
 
-def get_visitor_id(request: Request) -> tuple[str, bool]:
-    """Return the anonymous browser ID and whether a cookie must be set."""
+def get_visitor_id(request: Request) -> str:
+    """Return the anonymous ID for this browser, creating one when needed."""
     visitor_id = request.cookies.get(VISITOR_COOKIE)
     if visitor_id:
-        return visitor_id, False
+        return visitor_id
 
-    return str(uuid4()), True
+    return str(uuid4())
 
 
-def set_visitor_cookie(response: JSONResponse | HTMLResponse, visitor_id: str) -> None:
+def set_visitor_cookie(
+    response: JSONResponse | HTMLResponse,
+    visitor_id: str,
+    request: Request,
+) -> None:
     response.set_cookie(
         key=VISITOR_COOKIE,
         value=visitor_id,
+        max_age=VISITOR_COOKIE_MAX_AGE,
         httponly=True,
+        secure=request.url.scheme == "https",
         samesite="lax",
     )
 
@@ -153,10 +160,8 @@ def stream_assistant_response(
 def home(request: Request) -> HTMLResponse:
     response = templates.TemplateResponse(request, "index.html")
     response.headers["Cache-Control"] = "no-cache"
-    visitor_id, should_set_cookie = get_visitor_id(request)
-
-    if should_set_cookie:
-        set_visitor_cookie(response, visitor_id)
+    visitor_id = get_visitor_id(request)
+    set_visitor_cookie(response, visitor_id, request)
 
     return response
 
@@ -168,29 +173,27 @@ def health() -> dict[str, str]:
 
 @app.get("/api/conversations")
 def get_conversations(request: Request) -> JSONResponse:
-    visitor_id, should_set_cookie = get_visitor_id(request)
+    visitor_id = get_visitor_id(request)
     conversations = list_conversations(visitor_id)
 
     response = JSONResponse(
         {"conversations": [serialize_conversation(item) for item in conversations]}
     )
-    if should_set_cookie:
-        set_visitor_cookie(response, visitor_id)
+    set_visitor_cookie(response, visitor_id, request)
 
     return response
 
 
 @app.post("/api/conversations")
 def create_new_conversation(request: Request) -> JSONResponse:
-    visitor_id, should_set_cookie = get_visitor_id(request)
+    visitor_id = get_visitor_id(request)
     conversation, created = get_or_create_empty_conversation(visitor_id)
 
     response = JSONResponse(
         serialize_conversation(conversation),
         status_code=201 if created else 200,
     )
-    if should_set_cookie:
-        set_visitor_cookie(response, visitor_id)
+    set_visitor_cookie(response, visitor_id, request)
 
     return response
 
@@ -200,7 +203,7 @@ def delete_existing_conversation(
     conversation_id: str,
     request: Request,
 ) -> JSONResponse:
-    visitor_id, _ = get_visitor_id(request)
+    visitor_id = get_visitor_id(request)
     if not delete_conversation(visitor_id, conversation_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -209,7 +212,7 @@ def delete_existing_conversation(
 
 @app.get("/api/conversations/{conversation_id}")
 def get_conversation_history(conversation_id: str, request: Request) -> dict:
-    visitor_id, _ = get_visitor_id(request)
+    visitor_id = get_visitor_id(request)
     conversation = require_conversation(visitor_id, conversation_id)
     messages = list_messages(conversation.id)
 
@@ -225,7 +228,7 @@ def send_message(
     payload: MessageInput,
     request: Request,
 ) -> StreamingResponse:
-    visitor_id, _ = get_visitor_id(request)
+    visitor_id = get_visitor_id(request)
     require_conversation(visitor_id, conversation_id)
 
     user_message = payload.message.strip()
