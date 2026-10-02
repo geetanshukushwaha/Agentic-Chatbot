@@ -374,15 +374,24 @@ body {
 }
 
 @media (max-width: 767px) {
+  .app-shell {
+    position: fixed;
+    top: var(--visual-viewport-top, 0px);
+    right: 0;
+    left: 0;
+    height: var(--visual-viewport-height, 100dvh);
+  }
+
   .sidebar {
     position: fixed;
     z-index: 1040;
-    inset: 0 auto 0 0;
+    top: var(--visual-viewport-top, 0px);
+    left: 0;
     flex: none;
     width: min(86vw, 300px);
     min-width: 0;
     max-width: 300px;
-    height: 100dvh;
+    height: var(--visual-viewport-height, 100dvh);
     padding: 0.75rem;
     border-right-width: 1px;
     transform: translateX(-105%);
@@ -400,7 +409,10 @@ body {
   .sidebar-backdrop {
     position: fixed;
     z-index: 1039;
-    inset: 0;
+    top: var(--visual-viewport-top, 0px);
+    right: 0;
+    left: 0;
+    height: var(--visual-viewport-height, 100dvh);
     display: block;
     visibility: hidden;
     background: rgb(0 0 0 / 58%);
@@ -425,6 +437,7 @@ body {
   #messages {
     padding-right: 0.15rem;
     padding-left: 0.15rem;
+    overscroll-behavior-y: contain;
   }
 
   .message-bubble {

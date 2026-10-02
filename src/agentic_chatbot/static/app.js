@@ -82,7 +82,28 @@ function setStatus(message) {
 
 
 function scrollToBottom() {
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  const maxScrollTop = messagesContainer.scrollHeight - messagesContainer.clientHeight;
+  messagesContainer.scrollTop = maxScrollTop > 0 ? maxScrollTop : 0;
+}
+
+
+function updateVisualViewport() {
+  const viewport = window.visualViewport;
+  const wasAtBottom =
+    messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight <= 2;
+
+  document.documentElement.style.setProperty(
+    "--visual-viewport-height",
+    `${viewport?.height ?? window.innerHeight}px`,
+  );
+  document.documentElement.style.setProperty(
+    "--visual-viewport-top",
+    `${viewport?.offsetTop ?? 0}px`,
+  );
+
+  if (wasAtBottom) {
+    requestAnimationFrame(scrollToBottom);
+  }
 }
 
 
@@ -470,11 +491,15 @@ deleteConversationAction.addEventListener("click", () => {
 });
 
 window.addEventListener("resize", () => closeConversationContextMenu());
+window.addEventListener("resize", updateVisualViewport);
+window.visualViewport?.addEventListener("resize", updateVisualViewport);
+window.visualViewport?.addEventListener("scroll", updateVisualViewport);
 
 mobileViewport.addEventListener("change", () => {
   setSidebarOpen(!mobileViewport.matches);
 });
 
+updateVisualViewport();
 setSidebarOpen(!mobileViewport.matches);
 
 composer.addEventListener("submit", sendMessage);
